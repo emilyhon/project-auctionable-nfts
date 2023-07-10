@@ -1,3 +1,24 @@
+// Layout of Contract:
+// version
+// imports
+// errors
+// interfaces, libraries, contracts
+// Type declarations
+// State variables
+// Events
+// Modifiers
+// Functions
+
+// Layout of Functions:
+// constructor
+// receive function (if exists)
+// fallback function (if exists)
+// external
+// public
+// internal
+// private
+// view & pure functions
+
 // SPDX-License-Identifier: MIT
 
 pragma solidity 0.8.20;
@@ -13,9 +34,11 @@ contract Spud is ERC721 {
     }
 
     error Spud__UpkeepNotNeeded(AuctionInfo nextAuctionInfo);
+    error Spud__NotEnoughFunds();
 
     uint16 private constant MAX_NUM_TOKENS = 1000;
     uint32 private constant AUCTION_DURATION = 2 * 24 * 60 * 60; // 2 days
+    uint256 private constant PRICE = 0.1 ether;
 
     uint16 private s_tokenCounter;
     uint16 private s_auctionTokenCounter;
@@ -29,7 +52,9 @@ contract Spud is ERC721 {
      * @param tokenURI The token URI associated with this minted token
      */
     function mintNft(string memory tokenURI) external payable {
-        // add check for amount
+        if (msg.value < PRICE) {
+            revert Spud__NotEnoughFunds();
+        }
         // TODO: revert if over max mint amount
         _safeMint(address(this), s_tokenCounter);
         s_auctionInfos[s_tokenCounter] = AuctionInfo({
