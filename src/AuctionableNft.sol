@@ -23,6 +23,7 @@
 pragma solidity 0.8.20;
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {Counters} from "@openzeppelin/contracts/utils/Counters.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
@@ -33,7 +34,7 @@ import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/Autom
  * @author Emily Hon
  * @notice Any NFTs minted in this collection are minted to this contract address and are auctionable for a specified auction period. Afterwards, the NFT is transferred to the highest bidder or back to the original minter if no one bids.
  */
-contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, ReentrancyGuard {
+contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, ReentrancyGuard, IERC721Receiver {
     using Counters for Counters.Counter;
 
     /// @dev Information related to an auction listing
@@ -52,9 +53,9 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
     error AuctionableNft__WithdrawalFailed();
 
     uint256 private constant MAX_NUM_TOKENS = 1000;
-    uint256 private constant AUCTION_DURATION = 2 * 24 * 60 * 60; // 2 days
-    uint256 private constant PRICE = 0.1 ether;
+    uint256 private constant MINT_PRICE = 0.1 ether;
     uint256 private constant MIN_BID_INCREMENT = 0.01 ether;
+    uint256 private constant AUCTION_DURATION = 2 * 24 * 60 * 60; // 2 days
 
     Counters.Counter private s_tokenCounter;
     Counters.Counter private s_auctionTokenCounter;
@@ -68,15 +69,17 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
 
     /**
      * Mint function that sends the NFT to this contract address and triggers the auction process of the NFT
-     * @param tokenURI The token URI associated with this minted token
+     * @param tokenUri The token URI associated with this minted token
      */
-    function mintNft(string memory tokenURI) external payable {
-        if (msg.value < PRICE) {
+    function mintNft(string memory tokenUri) external payable {
+        if (msg.value < MINT_PRICE) {
             revert AuctionableNft__NotEnoughFunds();
         }
         if (s_tokenCounter.current() >= MAX_NUM_TOKENS) {
             revert AuctionableNft__CollectionSoldOut();
         }
+
+        // TODO: Add check to restrict the tokenURI passed in
 
         _safeMint(address(this), s_tokenCounter.current());
         s_auctionListings[s_tokenCounter.current()] = AuctionListing({
@@ -84,7 +87,7 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
             bidAmount: msg.value,
             expiryTimestamp: block.timestamp + AUCTION_DURATION
         });
-        s_tokenUris[s_tokenCounter.current()] = tokenURI;
+        s_tokenUris[s_tokenCounter.current()] = tokenUri;
 
         s_tokenCounter.increment();
     }
@@ -138,6 +141,17 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
     }
 
     /**
+     * @inheritdoc IERC721Receiver
+     */
+    function onERC721Received(address operator, address from, uint256 tokenId, bytes calldata data)
+        external
+        pure
+        returns (bytes4)
+    {
+        return bytes4(keccak256("onERC721Received(address,address,uint256,bytes)"));
+    }
+
+    /**
      * @dev This is the function that the Chainlink Automation nodes call to see if it is time to perform an upkeep.
      * The following should be true for this to return true:
      * 1. The time is past the end timestamp of the oldest token on auction
@@ -180,5 +194,43 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
         ERC721(address(this)).safeTransferFrom(
             address(this), auctionListing.bidderAddr, s_auctionTokenCounter.current()
         );
+    }
+
+    /// Public view / pure functions
+    function tokenURI(uint256 tokenId) public view virtual override returns (string memory) {
+        return s_tokenUris[tokenId];
+    }
+
+    function getMaxSupply() public pure returns (uint256) {
+        return MAX_NUM_TOKENS;
+    }
+
+    function getMintPrice() public pure returns (uint256) {
+        return MINT_PRICE;
+    }
+
+    function getMinimumBidIncrement() public pure returns (uint256) {
+        return MIN_BID_INCREMENT;
+    }
+
+    function getAuctionDurationInSeconds() public pure returns (uint256) {
+        return AUCTION_DURATION;
+    }
+
+    function getNumMintedTokens() public view returns (uint256) {
+        return s_tokenCounter.current();
+    }
+
+    function getAuctionTokenCounter() public view returns (uint256) {
+        return s_auctionTokenCounter.current();
+    }
+
+    function getAuctionListing(uint256 tokenId)
+        public
+        view
+        returns (address bidderAddr, uint256 bidAmount, uint256 expiryTimestamp)
+    {
+        AuctionListing memory listing = s_auctionListings[tokenId];
+        return (listing.bidderAddr, listing.bidAmount, listing.expiryTimestamp);
     }
 }
