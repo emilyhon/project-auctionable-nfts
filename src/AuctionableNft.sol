@@ -104,10 +104,10 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
             revert AuctionableNft__BiddingOnUnmintedNft();
         }
         uint256 minBidAmount = listing.bidAmount + MIN_BID_INCREMENT;
-        if (msg.value <= minBidAmount) {
+        if (msg.value < minBidAmount) {
             revert AuctionableNft__BidAmountMustBeGreaterThan(minBidAmount);
         }
-        if (block.timestamp <= listing.expiryTimestamp) {
+        if (block.timestamp > listing.expiryTimestamp) {
             revert AuctionableNft__AuctionExpired();
         }
 
@@ -143,7 +143,7 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
     /**
      * @inheritdoc IERC721Receiver
      */
-    function onERC721Received(address operator, address from, uint256 tokenId, bytes calldata data)
+    function onERC721Received(address, /*operator*/ address, /*from*/ uint256, /*tokenId*/ bytes calldata /*data*/ )
         external
         pure
         returns (bytes4)
@@ -232,5 +232,9 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
     {
         AuctionListing memory listing = s_auctionListings[tokenId];
         return (listing.bidderAddr, listing.bidAmount, listing.expiryTimestamp);
+    }
+
+    function getPendingWithdrawalAmount(address user) public view returns (uint256) {
+        return s_pendingWithdrawals[user];
     }
 }
