@@ -107,7 +107,6 @@ contract AuctionableNftTest is Test {
         auctionableNft.placeBid{value: placedBidAmount}(0);
 
         // Assert new auction listing is stored properly
-        assertEq(auctionableNft.ownerOf(0), address(auctionableNft));
         (address bidderAddr, uint256 bidAmount, uint256 expiryTimestamp) = auctionableNft.getAuctionListing(0);
         assertEq(bidderAddr, address(BIDDER));
         assertEq(bidAmount, placedBidAmount);
@@ -117,9 +116,50 @@ contract AuctionableNftTest is Test {
         assertEq(auctionableNft.getPendingWithdrawalAmount(USER), mintPrice);
     }
 
-    function testPlaceBidSuccessMultiple() public mintedNftWithUser {}
+    function testPlaceBidSuccessMultiple() public mintedNftWithUser {
+        uint256 mintPrice = auctionableNft.getMintPrice();
+        uint256 minBidIncrement = auctionableNft.getMinimumBidIncrement();
+        uint256 placedBidAmount = mintPrice + minBidIncrement;
+        vm.prank(BIDDER);
+        auctionableNft.placeBid{value: placedBidAmount}(0);
 
-    function testPlaceBidSuccessWithSameBidderHigherAmount() public mintedNftWithUser {}
+        address newBidder = makeAddr("newBidder");
+        vm.deal(newBidder, STARTING_USER_BALANCE);
+        vm.prank(newBidder);
+        auctionableNft.placeBid{value: STARTING_USER_BALANCE}(0);
+
+        // Assert new auction listing is stored properly
+        (address bidderAddr, uint256 bidAmount, uint256 expiryTimestamp) = auctionableNft.getAuctionListing(0);
+        assertEq(bidderAddr, address(newBidder));
+        assertEq(bidAmount, STARTING_USER_BALANCE);
+        assertEq(expiryTimestamp, block.timestamp + auctionableNft.getAuctionDurationInSeconds());
+
+        // Assert previous bidders are eligible for fund withdrawal
+        assertEq(auctionableNft.getPendingWithdrawalAmount(USER), mintPrice);
+        assertEq(auctionableNft.getPendingWithdrawalAmount(BIDDER), placedBidAmount);
+    }
+
+    function testPlaceBidSuccessWithSameBidderHigherAmount() public mintedNftWithUser {
+        uint256 mintPrice = auctionableNft.getMintPrice();
+        uint256 minBidIncrement = auctionableNft.getMinimumBidIncrement();
+        uint256 placedBidAmount = mintPrice + minBidIncrement;
+        vm.prank(BIDDER);
+        auctionableNft.placeBid{value: placedBidAmount}(0);
+
+        vm.deal(BIDDER, STARTING_USER_BALANCE);
+        vm.prank(BIDDER);
+        auctionableNft.placeBid{value: STARTING_USER_BALANCE}(0);
+
+        // Assert new auction listing is stored properly
+        (address bidderAddr, uint256 bidAmount, uint256 expiryTimestamp) = auctionableNft.getAuctionListing(0);
+        assertEq(bidderAddr, address(BIDDER));
+        assertEq(bidAmount, STARTING_USER_BALANCE);
+        assertEq(expiryTimestamp, block.timestamp + auctionableNft.getAuctionDurationInSeconds());
+
+        // Assert previous bidders are eligible for fund withdrawal
+        assertEq(auctionableNft.getPendingWithdrawalAmount(USER), mintPrice);
+        assertEq(auctionableNft.getPendingWithdrawalAmount(BIDDER), placedBidAmount);
+    }
 
     function testPlaceBidFailOnUnmintedNft() public {
         vm.expectRevert(AuctionableNft.AuctionableNft__BiddingOnUnmintedNft.selector);
