@@ -22,6 +22,9 @@ contract AuctionableNftTest is Test {
     function testMintNftSuccess() public mintedNftWithUser {
         uint256 price = auctionableNft.getMintPrice();
 
+        assertEq(USER.balance, STARTING_USER_BALANCE - price);
+        assertEq(address(auctionableNft).balance, price);
+
         assertEq(auctionableNft.ownerOf(0), address(auctionableNft));
         (address bidderAddr, uint256 bidAmount, uint256 expiryTimestamp) = auctionableNft.getAuctionListing(0);
         assertEq(bidderAddr, address(USER));
@@ -78,13 +81,14 @@ contract AuctionableNftTest is Test {
         vm.stopPrank();
     }
 
-    // TODO: Add test for checking the token URI or other parameters
-
     function testMintNftOverMintPrice() public {
         uint256 price = auctionableNft.getMintPrice();
         uint256 payment = price * 2;
         vm.prank(USER);
         auctionableNft.mintNft{value: payment}("");
+
+        assertEq(USER.balance, STARTING_USER_BALANCE - payment);
+        assertEq(address(auctionableNft).balance, payment);
 
         assertEq(auctionableNft.ownerOf(0), address(auctionableNft));
         (address bidderAddr, uint256 bidAmount, uint256 expiryTimestamp) = auctionableNft.getAuctionListing(0);
@@ -105,6 +109,11 @@ contract AuctionableNftTest is Test {
         uint256 placedBidAmount = mintPrice + minBidIncrement;
         vm.prank(BIDDER);
         auctionableNft.placeBid{value: placedBidAmount}(0);
+
+        // Assert funds were transferred successfully
+        assertEq(USER.balance, STARTING_USER_BALANCE - mintPrice);
+        assertEq(BIDDER.balance, STARTING_USER_BALANCE - placedBidAmount);
+        assertEq(address(auctionableNft).balance, mintPrice + placedBidAmount);
 
         // Assert new auction listing is stored properly
         (address bidderAddr, uint256 bidAmount, uint256 expiryTimestamp) = auctionableNft.getAuctionListing(0);
@@ -142,13 +151,20 @@ contract AuctionableNftTest is Test {
     function testPlaceBidSuccessWithSameBidderHigherAmount() public mintedNftWithUser {
         uint256 mintPrice = auctionableNft.getMintPrice();
         uint256 minBidIncrement = auctionableNft.getMinimumBidIncrement();
-        uint256 placedBidAmount = mintPrice + minBidIncrement;
+        uint256 firstBidAmount = mintPrice + minBidIncrement;
         vm.prank(BIDDER);
-        auctionableNft.placeBid{value: placedBidAmount}(0);
+        auctionableNft.placeBid{value: firstBidAmount}(0);
 
-        vm.deal(BIDDER, STARTING_USER_BALANCE);
+        assertEq(BIDDER.balance, STARTING_USER_BALANCE - firstBidAmount);
+
+        uint256 secondBidAmount = 10 ether;
+        vm.deal(BIDDER, secondBidAmount);
         vm.prank(BIDDER);
-        auctionableNft.placeBid{value: STARTING_USER_BALANCE}(0);
+        auctionableNft.placeBid{value: secondBidAmount}(0);
+
+        // Assert funds were transferred successfully
+        assertEq(BIDDER.balance, 0);
+        assertEq(address(auctionableNft).balance, mintPrice + firstBidAmount + secondBidAmount);
 
         // Assert new auction listing is stored properly
         (address bidderAddr, uint256 bidAmount, uint256 expiryTimestamp) = auctionableNft.getAuctionListing(0);
@@ -158,7 +174,7 @@ contract AuctionableNftTest is Test {
 
         // Assert previous bidders are eligible for fund withdrawal
         assertEq(auctionableNft.getPendingWithdrawalAmount(USER), mintPrice);
-        assertEq(auctionableNft.getPendingWithdrawalAmount(BIDDER), placedBidAmount);
+        assertEq(auctionableNft.getPendingWithdrawalAmount(BIDDER), firstBidAmount);
     }
 
     function testPlaceBidFailOnUnmintedNft() public {
@@ -195,7 +211,39 @@ contract AuctionableNftTest is Test {
         auctionableNft.placeBid{value: minBidAmount + minBidIncrement}(0);
     }
 
-    /////..... withdrawInvalidBid ...../////
+    /////..... withdrawBalance ...../////
+
+    function testWithdrawBalanceSuccessForMinter() public mintedNftWithUser bidOnToken0WithBidder {
+        assertEq(auctionableNft.getMintPrice(), auctionableNft.getPendingWithdrawalAmount(USER));
+    }
+
+    function testWithdrawBalanceSuccessForBidder() public mintedNftWithUser {
+        uint256 minBidAmount = auctionableNft.getMinimumBidAmount(0);
+        vm.prank(BIDDER);
+        auctionableNft.placeBid{value: minBidAmount}(0);
+        console.log(auctionableNft.getPendingWithdrawalAmount(USER));
+        console.log(auctionableNft.getPendingWithdrawalAmount(BIDDER));
+
+        address newBidder = makeAddr("newBidder");
+        uint256 newBidAmount = 10 ether;
+        vm.deal(newBidder, newBidAmount);
+        vm.prank(newBidder);
+        auctionableNft.placeBid{value: newBidAmount}(0);
+
+        uint256 expectedWithdrawalAmount = auctionableNft.getPendingWithdrawalAmount(BIDDER);
+        assertEq(expectedWithdrawalAmount, minBidAmount);
+
+        uint256 bidderBeginningBalance = BIDDER.balance;
+        uint256 contractBeginningBalance = address(auctionableNft).balance;
+        vm.prank(BIDDER);
+        auctionableNft.withdrawBalance();
+
+        assertEq(auctionableNft.getPendingWithdrawalAmount(BIDDER), 0);
+        assertEq(BIDDER.balance, bidderBeginningBalance + expectedWithdrawalAmount);
+        assertEq(address(auctionableNft).balance, contractBeginningBalance - expectedWithdrawalAmount);
+    }
+
+    /////..... withdraw ...../////
     /////..... onERC721Received ...../////
     /////..... checkUpkeep ...../////
     /////..... performUpkeep ...../////
@@ -206,6 +254,13 @@ contract AuctionableNftTest is Test {
         uint256 price = auctionableNft.getMintPrice();
         vm.prank(USER);
         auctionableNft.mintNft{value: price}("");
+        _;
+    }
+
+    modifier bidOnToken0WithBidder() {
+        uint256 minBidAmount = auctionableNft.getMinimumBidAmount(0);
+        vm.prank(BIDDER);
+        auctionableNft.placeBid{value: minBidAmount}(0);
         _;
     }
 }

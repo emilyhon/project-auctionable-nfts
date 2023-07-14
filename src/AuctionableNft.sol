@@ -51,6 +51,8 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
     error AuctionableNft__BidAmountMustBeGreaterThan(uint256 lastBidAmount);
     error AuctionableNft__AuctionExpired();
     error AuctionableNft__WithdrawalFailed();
+    error AuctionableNft__TokenNotAuctionable();
+    error AuctionableNft__ExceededWithdrawalLimit(uint256 withdrawalLimit);
 
     uint256 private constant MAX_NUM_TOKENS = 1000;
     uint256 private constant MINT_PRICE = 0.1 ether;
@@ -62,6 +64,7 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
     string[MAX_NUM_TOKENS] s_tokenUris;
     AuctionListing[MAX_NUM_TOKENS] s_auctionListings;
     mapping(address => uint256) s_pendingWithdrawals;
+    uint256 s_pendingWithdrawalsTotal;
 
     constructor() ERC721("AuctionableNft", "NFT") {
         // TODO: Change name and symbol
@@ -112,6 +115,7 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
         }
 
         s_pendingWithdrawals[listing.bidderAddr] += listing.bidAmount;
+        s_pendingWithdrawalsTotal += listing.bidAmount;
 
         s_auctionListings[tokenId] =
             AuctionListing({bidderAddr: msg.sender, bidAmount: msg.value, expiryTimestamp: listing.expiryTimestamp});
@@ -120,9 +124,10 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
     /**
      * Withdraw function that allows caller to collect all their funds from invalid bids
      */
-    function withdrawInvalidBid() external {
+    function withdrawBalance() external {
         uint256 amount = s_pendingWithdrawals[msg.sender];
         delete s_pendingWithdrawals[msg.sender];
+        s_pendingWithdrawalsTotal -= amount;
         (bool sent, /*bytes memory data*/ ) = msg.sender.call{value: amount}("");
         if (!sent) {
             revert AuctionableNft__WithdrawalFailed();
@@ -134,6 +139,9 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
      * @param amount The amount to be withdrawn
      */
     function withdraw(uint256 amount) external onlyOwner nonReentrant {
+        if (amount > s_pendingWithdrawalsTotal) {
+            revert AuctionableNft__ExceededWithdrawalLimit(s_pendingWithdrawalsTotal);
+        }
         (bool sent, /*bytes memory data*/ ) = owner().call{value: amount}("");
         if (!sent) {
             revert AuctionableNft__WithdrawalFailed();
@@ -213,6 +221,16 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
         return MIN_BID_INCREMENT;
     }
 
+    function getMinimumBidAmount(uint256 tokenId) public view returns (uint256) {
+        AuctionListing storage listing = s_auctionListings[tokenId];
+        uint256 lastBidAmount = listing.bidAmount;
+        if (lastBidAmount == 0 || listing.expiryTimestamp < block.timestamp) {
+            revert AuctionableNft__TokenNotAuctionable();
+        }
+
+        return lastBidAmount + MIN_BID_INCREMENT;
+    }
+
     function getAuctionDurationInSeconds() public pure returns (uint256) {
         return AUCTION_DURATION;
     }
@@ -236,5 +254,9 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
 
     function getPendingWithdrawalAmount(address user) public view returns (uint256) {
         return s_pendingWithdrawals[user];
+    }
+
+    function getPendingWithdrawalTotal() public view onlyOwner returns (uint256) {
+        return s_pendingWithdrawalsTotal;
     }
 }
