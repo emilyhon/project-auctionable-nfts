@@ -17,6 +17,8 @@ contract AuctionableNftTest is Test {
         vm.deal(BIDDER, STARTING_USER_BALANCE);
     }
 
+    receive() external payable {}
+
     /////..... mintNft ...../////
 
     function testMintNftSuccess() public mintedNftWithUser {
@@ -243,8 +245,45 @@ contract AuctionableNftTest is Test {
         assertEq(address(auctionableNft).balance, contractBeginningBalance - expectedWithdrawalAmount);
     }
 
+    function testWithdrawBalanceSuccessNoBalance() public mintedNftWithUser {
+        uint256 userBalance = USER.balance;
+        vm.prank(USER);
+        auctionableNft.withdrawBalance();
+        assertEq(userBalance, USER.balance);
+    }
+
     /////..... withdraw ...../////
+
+    function testWithdrawSuccess() public mintedNftWithUser bidOnToken0WithBidder {
+        uint256 mintTimestamp = block.timestamp;
+        uint256 expiryTimestamp = mintTimestamp + auctionableNft.getAuctionDurationInSeconds();
+        vm.warp(expiryTimestamp + 1);
+
+        // Owner should be able to withdraw amount equal to the bid amount
+        uint256 initialBalance = address(this).balance;
+        uint256 lastBidAmount = auctionableNft.getLastBidAmount(0);
+        auctionableNft.withdraw(lastBidAmount);
+        assertEq(address(this).balance, initialBalance + lastBidAmount);
+    }
+
+    function testWithdrawFailNonOwner() public {
+        vm.expectRevert();
+        vm.prank(USER);
+        auctionableNft.withdraw(0);
+    }
+
+    function testWithdrawFailExceedingAmount() public {
+        vm.expectRevert(AuctionableNft.AuctionableNft__ExceededWithdrawalLimit.selector);
+        auctionableNft.withdraw(1);
+    }
+
     /////..... onERC721Received ...../////
+
+    function testOnERC721Received() public {
+        bytes4 expectedReturn = bytes4(keccak256("onERC721Received(address,address,uint256,bytes)"));
+        assertEq(expectedReturn, auctionableNft.onERC721Received(USER, USER, 0, ""));
+    }
+
     /////..... checkUpkeep ...../////
     /////..... performUpkeep ...../////
     /////..... _processCompletedAuctionListing ...../////
