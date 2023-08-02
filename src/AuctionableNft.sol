@@ -1,30 +1,8 @@
-// Layout of Contract:
-// version
-// imports
-// interfaces, libraries, contracts
-// Type declarations
-// State variables
-// Events
-// Errors
-// Modifiers
-// Functions
-
-// Layout of Functions:
-// constructor
-// receive function (if exists)
-// fallback function (if exists)
-// external
-// public
-// internal
-// private
-// view & pure functions
-
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
-import {Counters} from "@openzeppelin/contracts/utils/Counters.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/AutomationCompatible.sol";
@@ -35,8 +13,6 @@ import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/Autom
  * @notice Any NFTs minted in this collection are minted to this contract address and are auctionable for a specified auction period. Afterwards, the NFT is transferred to the highest bidder or back to the original minter if no one bids.
  */
 contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, ReentrancyGuard, IERC721Receiver {
-    using Counters for Counters.Counter;
-
     /// @dev Information related to an auction listing
     struct AuctionListing {
         address bidderAddr;
@@ -60,8 +36,8 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
     uint256 private constant AUCTION_DURATION = 2 * 24 * 60 * 60; // 2 days
 
     // TODO: Remove usage of Counter
-    Counters.Counter private s_tokenCounter;
-    Counters.Counter private s_auctionTokenCounter;
+    uint256 private s_tokenCounter;
+    uint256 private s_auctionTokenCounter;
     string[MAX_NUM_TOKENS] s_tokenUris;
     AuctionListing[MAX_NUM_TOKENS] s_auctionListings;
     mapping(address => uint256) s_pendingWithdrawals;
@@ -79,21 +55,21 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
         if (msg.value < MINT_PRICE) {
             revert AuctionableNft__NotEnoughFunds();
         }
-        if (s_tokenCounter.current() >= MAX_NUM_TOKENS) {
+        if (s_tokenCounter >= MAX_NUM_TOKENS) {
             revert AuctionableNft__CollectionSoldOut();
         }
 
         // TODO: Add check to restrict the tokenURI passed in
 
-        _safeMint(address(this), s_tokenCounter.current());
-        s_auctionListings[s_tokenCounter.current()] = AuctionListing({
+        _safeMint(address(this), s_tokenCounter);
+        s_auctionListings[s_tokenCounter] = AuctionListing({
             bidderAddr: msg.sender,
             bidAmount: msg.value,
             expiryTimestamp: block.timestamp + AUCTION_DURATION
         });
-        s_tokenUris[s_tokenCounter.current()] = tokenUri;
+        s_tokenUris[s_tokenCounter] = tokenUri;
 
-        s_tokenCounter.increment();
+        s_tokenCounter++;
     }
 
     /**
@@ -174,8 +150,8 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
         view
         returns (bool upkeepNeeded, bytes memory /*performData */ )
     {
-        if (s_auctionTokenCounter.current() < MAX_NUM_TOKENS) {
-            AuctionListing memory currentListing = s_auctionListings[s_auctionTokenCounter.current()];
+        if (s_auctionTokenCounter < MAX_NUM_TOKENS) {
+            AuctionListing memory currentListing = s_auctionListings[s_auctionTokenCounter];
             bool isAuctionActive = currentListing.bidAmount > 0;
             bool timeHasPassed = block.timestamp >= currentListing.expiryTimestamp;
             bool hasBalance = address(this).balance > 0;
@@ -196,18 +172,15 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
         }
 
         _processCompletedAuctionListing();
-        s_auctionTokenCounter.increment();
+        s_auctionTokenCounter++;
     }
 
     /**
      * Process the completed auction by sending the NFT to the last bidder.
      */
     function _processCompletedAuctionListing() private {
-        AuctionListing memory auctionListing = s_auctionListings[s_auctionTokenCounter.current()];
-        // TODO: Does this need allow permissions? If it does, does the permissions need to be rescinded after the NFT is transferred?
-        ERC721(address(this)).safeTransferFrom(
-            address(this), auctionListing.bidderAddr, s_auctionTokenCounter.current()
-        );
+        AuctionListing memory auctionListing = s_auctionListings[s_auctionTokenCounter];
+        ERC721(address(this)).safeTransferFrom(address(this), auctionListing.bidderAddr, s_auctionTokenCounter);
     }
 
     /// Public view / pure functions
@@ -247,11 +220,11 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
     }
 
     function getNumMintedTokens() public view returns (uint256) {
-        return s_tokenCounter.current();
+        return s_tokenCounter;
     }
 
     function getAuctionTokenCounter() public view returns (uint256) {
-        return s_auctionTokenCounter.current();
+        return s_auctionTokenCounter;
     }
 
     function getAuctionListing(uint256 tokenId)
