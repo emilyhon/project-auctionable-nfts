@@ -35,7 +35,6 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
     uint256 private constant MIN_BID_INCREMENT = 0.01 ether;
     uint256 private constant AUCTION_DURATION = 2 * 24 * 60 * 60; // 2 days
 
-    // TODO: Remove usage of Counter
     uint256 private s_tokenCounter;
     uint256 private s_auctionTokenCounter;
     string[MAX_NUM_TOKENS] s_tokenUris;
@@ -104,7 +103,6 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
     function withdrawBalance() external nonReentrant {
         uint256 amount = s_pendingWithdrawals[msg.sender];
         delete s_pendingWithdrawals[msg.sender];
-        // TODO: test if exiting early if amount is 0 saves gas
         s_pendingWithdrawalsTotal -= amount;
         (bool sent, /*bytes memory data*/ ) = msg.sender.call{value: amount}("");
         if (!sent) {

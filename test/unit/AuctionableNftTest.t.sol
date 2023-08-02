@@ -283,6 +283,10 @@ contract AuctionableNftTest is Test {
         auctionableNft.withdraw(1);
     }
 
+    function testWithdrawZero() public {
+        auctionableNft.withdraw(0);
+    }
+
     /////..... onERC721Received ...../////
 
     function testOnERC721Received() public {
