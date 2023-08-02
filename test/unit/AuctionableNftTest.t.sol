@@ -3,6 +3,7 @@ pragma solidity 0.8.20;
 
 import {Test, console} from "forge-std/Test.sol";
 import {AuctionableNft} from "../../src/AuctionableNft.sol";
+import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 
 contract AuctionableNftTest is Test {
     AuctionableNft auctionableNft;
@@ -60,7 +61,14 @@ contract AuctionableNftTest is Test {
         assertEq(expiryTimestamp + timePassed, expiryTimestamp2);
     }
 
-    // TODO: Test mint nft token URI stored properly
+    function testMintNftTokenURI() public {
+        string memory tokenURI = "hello";
+        uint256 price = auctionableNft.getMintPrice();
+        vm.prank(USER);
+        auctionableNft.mintNft{value: price}(tokenURI);
+
+        assertEq(tokenURI, auctionableNft.tokenURI(0));
+    }
 
     function testMintNftNotEnoughFunds() public {
         vm.expectRevert(AuctionableNft.AuctionableNft__NotEnoughFunds.selector);
@@ -223,8 +231,6 @@ contract AuctionableNftTest is Test {
         uint256 minBidAmount = auctionableNft.getMinimumBidAmount(0);
         vm.prank(BIDDER);
         auctionableNft.placeBid{value: minBidAmount}(0);
-        console.log(auctionableNft.getPendingWithdrawalAmount(USER));
-        console.log(auctionableNft.getPendingWithdrawalAmount(BIDDER));
 
         address newBidder = makeAddr("newBidder");
         uint256 newBidAmount = 10 ether;
@@ -285,8 +291,117 @@ contract AuctionableNftTest is Test {
     }
 
     /////..... checkUpkeep ...../////
+
+    function testCheckUpkeepTrue() public mintedNftWithUser {
+        // pass time
+        uint256 mintTimestamp = block.timestamp;
+        uint256 expiryTimestamp = mintTimestamp + auctionableNft.getAuctionDurationInSeconds();
+        vm.warp(expiryTimestamp + 1);
+
+        (bool upkeepNeeded,) = auctionableNft.checkUpkeep("0x0");
+        assertEq(upkeepNeeded, true);
+    }
+
+    function testCheckUpkeepFalseNoActiveAuction() public {
+        (bool upkeepNeeded,) = auctionableNft.checkUpkeep("0x0");
+        assertEq(upkeepNeeded, false);
+    }
+
+    function testCheckUpkeepFalseTimeNotPassed() public mintedNftWithUser {
+        // pass time
+        uint256 mintTimestamp = block.timestamp;
+        uint256 expiryTimestamp = mintTimestamp + auctionableNft.getAuctionDurationInSeconds();
+        vm.warp(expiryTimestamp - 1);
+        (bool upkeepNeeded,) = auctionableNft.checkUpkeep("0x0");
+        assertEq(upkeepNeeded, false);
+    }
+
+    function testCheckUpkeepFalseAllAuctionedAlready() public {
+        uint256 price = auctionableNft.getMintPrice();
+        uint256 numSupply = auctionableNft.getMaxSupply();
+        vm.deal(USER, price * numSupply);
+
+        for (uint256 i = 0; i < numSupply; i++) {
+            vm.prank(USER);
+            auctionableNft.mintNft{value: price}("");
+
+            uint256 mintTimestamp = block.timestamp;
+            uint256 expiryTimestamp = mintTimestamp + auctionableNft.getAuctionDurationInSeconds();
+            vm.warp(expiryTimestamp + 1);
+
+            (bool upkeepNeeded,) = auctionableNft.checkUpkeep("0x0");
+            assertEq(upkeepNeeded, true);
+        }
+
+        vm.warp(block.timestamp * 2);
+
+        (bool finalUpkeepNeeded,) = auctionableNft.checkUpkeep("0x0");
+        assertEq(finalUpkeepNeeded, true);
+    }
+
     /////..... performUpkeep ...../////
     /////..... _processCompletedAuctionListing ...../////
+
+    function testPerformUpkeepSuccess() public mintedNftWithUser {
+        // pass time
+        uint256 mintTimestamp = block.timestamp;
+        uint256 expiryTimestamp = mintTimestamp + auctionableNft.getAuctionDurationInSeconds();
+        vm.warp(expiryTimestamp + 1);
+
+        auctionableNft.performUpkeep("");
+        assertEq(auctionableNft.getAuctionTokenCounter(), 1);
+        assertEq(auctionableNft.ownerOf(0), address(USER));
+    }
+
+    function testPerformUpkeepFailsUpkeepNotNeeded() public mintedNftWithUser {
+        vm.expectRevert(AuctionableNft.AuctionableNft__UpkeepNotNeeded.selector);
+        auctionableNft.performUpkeep("");
+    }
+
+    /////..... public view / pure functions ...../////
+
+    function testGetMinimumBidAmountReturnsMaxIntOnInvalidListing() public {
+        uint256 maxInt = 2 ** 256 - 1;
+        assertEq(maxInt, auctionableNft.getMinimumBidAmount(0));
+    }
+
+    function testGetNumMintedTokens() public {
+        assertEq(0, auctionableNft.getNumMintedTokens());
+
+        uint256 price = auctionableNft.getMintPrice();
+        vm.prank(USER);
+        auctionableNft.mintNft{value: price}("");
+
+        assertEq(1, auctionableNft.getNumMintedTokens());
+    }
+
+    function testGetWithdrawableAmounts() public mintedNftWithUser {
+        // pass time
+        uint256 mintTimestamp = block.timestamp;
+        uint256 expiryTimestamp = mintTimestamp + auctionableNft.getAuctionDurationInSeconds();
+        vm.warp(expiryTimestamp + 1);
+
+        assertEq(auctionableNft.getPendingWithdrawalTotal(), 0);
+        assertEq(auctionableNft.getMintPrice(), auctionableNft.getMaxWithdrawableAmount());
+    }
+
+    function testGetMaxWithdrawableAmount() public mintedNftWithUser {
+        uint256 minBidAmount = auctionableNft.getMinimumBidAmount(0);
+        vm.prank(BIDDER);
+        auctionableNft.placeBid{value: minBidAmount}(0);
+
+        uint256 mintPrice = auctionableNft.getMintPrice();
+        assertEq(auctionableNft.getPendingWithdrawalTotal(), mintPrice);
+        assertEq(auctionableNft.getPendingWithdrawalAmount(address(USER)), mintPrice);
+
+        // pass time
+        uint256 mintTimestamp = block.timestamp;
+        uint256 expiryTimestamp = mintTimestamp + auctionableNft.getAuctionDurationInSeconds();
+        vm.warp(expiryTimestamp + 1);
+
+        assertEq(auctionableNft.getPendingWithdrawalTotal(), mintPrice);
+        assertEq(minBidAmount, auctionableNft.getMaxWithdrawableAmount());
+    }
 
     /////..... Modifiers ...../////
     modifier mintedNftWithUser() {

@@ -44,7 +44,7 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
         uint256 expiryTimestamp;
     }
 
-    error AuctionableNft__UpkeepNotNeeded(AuctionListing nextEndingAuctionListing);
+    error AuctionableNft__UpkeepNotNeeded();
     error AuctionableNft__NotEnoughFunds();
     error AuctionableNft__CollectionSoldOut();
     error AuctionableNft__BiddingOnUnmintedNft();
@@ -59,6 +59,7 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
     uint256 private constant MIN_BID_INCREMENT = 0.01 ether;
     uint256 private constant AUCTION_DURATION = 2 * 24 * 60 * 60; // 2 days
 
+    // TODO: Remove usage of Counter
     Counters.Counter private s_tokenCounter;
     Counters.Counter private s_auctionTokenCounter;
     string[MAX_NUM_TOKENS] s_tokenUris;
@@ -173,10 +174,14 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
         view
         returns (bool upkeepNeeded, bytes memory /*performData */ )
     {
-        bool timeHasPassed = block.timestamp >= s_auctionListings[s_auctionTokenCounter.current()].expiryTimestamp;
-        bool isAuctionActive = s_auctionTokenCounter.current() != MAX_NUM_TOKENS;
-        bool hasBalance = address(this).balance > 0;
-        upkeepNeeded = (timeHasPassed && isAuctionActive && hasBalance);
+        if (s_auctionTokenCounter.current() < MAX_NUM_TOKENS) {
+            AuctionListing memory currentListing = s_auctionListings[s_auctionTokenCounter.current()];
+            bool isAuctionActive = currentListing.bidAmount > 0;
+            bool timeHasPassed = block.timestamp >= currentListing.expiryTimestamp;
+            bool hasBalance = address(this).balance > 0;
+            upkeepNeeded = (timeHasPassed && isAuctionActive && hasBalance);
+        }
+
         return (upkeepNeeded, "0x0");
     }
 
@@ -184,10 +189,10 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
      * @dev This is the function that Chainlink Automation nodes call after checkUpkeep() returns true.
      * The function ends the expired auction of an NFT and transfers it to the highest bidder.
      */
-    function performUpkeep(bytes calldata /* performData */ ) external {
+    function performUpkeep(bytes calldata /* performData */ ) external nonReentrant {
         (bool upkeepNeeded,) = checkUpkeep("");
         if (!upkeepNeeded) {
-            revert AuctionableNft__UpkeepNotNeeded(s_auctionListings[s_auctionTokenCounter.current()]);
+            revert AuctionableNft__UpkeepNotNeeded();
         }
 
         _processCompletedAuctionListing();
