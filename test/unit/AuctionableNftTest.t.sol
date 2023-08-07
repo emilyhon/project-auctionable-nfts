@@ -13,7 +13,7 @@ contract AuctionableNftTest is Test {
     uint256 public constant STARTING_USER_BALANCE = 10 ether;
 
     function setUp() public {
-        auctionableNft = new AuctionableNft();
+        auctionableNft = new AuctionableNft(address(this));
         vm.deal(USER, STARTING_USER_BALANCE);
         vm.deal(BIDDER, STARTING_USER_BALANCE);
     }

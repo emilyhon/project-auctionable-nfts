@@ -7,7 +7,7 @@ import {AuctionableNft} from "../src/AuctionableNft.sol";
 contract DeployAuctionableNft is Script {
     function run() external returns (AuctionableNft) {
         vm.startBroadcast();
-        AuctionableNft auctionableNft = new AuctionableNft();
+        AuctionableNft auctionableNft = new AuctionableNft(msg.sender);
         vm.stopBroadcast();
         return auctionableNft;
     }

@@ -42,7 +42,7 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
     mapping(address => uint256) s_pendingWithdrawals;
     uint256 s_pendingWithdrawalsTotal;
 
-    constructor() ERC721("AuctionableNft", "NFT") {
+    constructor(address initialOwner) ERC721("AuctionableNft", "NFT") Ownable(initialOwner) {
         // TODO: Change name and symbol
     }
 
