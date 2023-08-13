@@ -4,7 +4,6 @@ pragma solidity 0.8.20;
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/AutomationCompatible.sol";
 
 /**
@@ -12,7 +11,7 @@ import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/Autom
  * @author Emily Hon
  * @notice Any NFTs minted in this collection are minted to this contract address and are auctionable for a specified auction period. Afterwards, the NFT is transferred to the highest bidder or back to the original minter if no one bids.
  */
-contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, ReentrancyGuard, IERC721Receiver {
+contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, IERC721Receiver {
     /// @dev Information related to an auction listing
     struct AuctionListing {
         address bidderAddr;
@@ -34,7 +33,10 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
     uint256 private constant MINT_PRICE = 0.1 ether;
     uint256 private constant MIN_BID_INCREMENT = 0.01 ether;
     uint256 private constant AUCTION_DURATION = 2 * 24 * 60 * 60; // 2 days
+    bytes4 private constant ONERC721RECEIVED_EVENT_SIGNATURE = 0x150b7a02; // The 'onERC721Received' event signature is given by keccak256("onERC721Received(address,address,uint256,bytes)")
 
+    string private s_name;
+    string private s_symbol;
     uint256 private s_tokenCounter;
     uint256 private s_auctionTokenCounter;
     string[MAX_NUM_TOKENS] s_tokenUris;
@@ -42,8 +44,25 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
     mapping(address => uint256) s_pendingWithdrawals;
     uint256 s_pendingWithdrawalsTotal;
 
-    constructor(address initialOwner) ERC721("AuctionableNft", "NFT") Ownable(initialOwner) {
-        // TODO: Change name and symbol
+    // TODO: Emit events for important contract actions, such as minting, bidding, and transferring NFTs
+
+    /**
+     * Instantiate the contract
+     * @param initialOwner The address of the owner of this contract
+     */
+    constructor(address initialOwner, string memory name, string memory symbol)
+        ERC721(name, symbol)
+        Ownable(initialOwner)
+    {
+        s_name = name;
+        s_symbol = symbol;
+    }
+
+    /**
+     * Deposit ether
+     */
+    receive() external payable {
+        // Maybe mintNft with random tokenURI
     }
 
     /**
@@ -100,7 +119,7 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
     /**
      * Withdraw function that allows caller to collect all their funds from invalid bids
      */
-    function withdrawBalance() external nonReentrant {
+    function withdrawBalance() external {
         uint256 amount = s_pendingWithdrawals[msg.sender];
         delete s_pendingWithdrawals[msg.sender];
         s_pendingWithdrawalsTotal -= amount;
@@ -114,11 +133,11 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
      * Withdraw function that allows the owner to withdraw the specified amount of funds from this contract
      * @param amount The amount to be withdrawn
      */
-    function withdraw(uint256 amount) external onlyOwner nonReentrant {
+    function withdraw(uint256 amount) external onlyOwner {
         if (amount > getMaxWithdrawableAmount()) {
             revert AuctionableNft__ExceededWithdrawalLimit();
         }
-        (bool sent, /*bytes memory data*/ ) = owner().call{value: amount}("");
+        (bool sent, /*bytes memory data*/ ) = payable(owner()).call{value: amount}("");
         if (!sent) {
             revert AuctionableNft__WithdrawalFailed();
         }
@@ -132,7 +151,7 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
         pure
         returns (bytes4)
     {
-        return bytes4(keccak256("onERC721Received(address,address,uint256,bytes)"));
+        return ONERC721RECEIVED_EVENT_SIGNATURE;
     }
 
     /**
@@ -163,22 +182,16 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, Reent
      * @dev This is the function that Chainlink Automation nodes call after checkUpkeep() returns true.
      * The function ends the expired auction of an NFT and transfers it to the highest bidder.
      */
-    function performUpkeep(bytes calldata /* performData */ ) external nonReentrant {
+    function performUpkeep(bytes calldata /* performData */ ) external {
         (bool upkeepNeeded,) = checkUpkeep("");
         if (!upkeepNeeded) {
             revert AuctionableNft__UpkeepNotNeeded();
         }
 
-        _processCompletedAuctionListing();
-        s_auctionTokenCounter++;
-    }
-
-    /**
-     * Process the completed auction by sending the NFT to the last bidder.
-     */
-    function _processCompletedAuctionListing() private {
         AuctionListing memory auctionListing = s_auctionListings[s_auctionTokenCounter];
+        // TODO: add safe guard for this
         ERC721(address(this)).safeTransferFrom(address(this), auctionListing.bidderAddr, s_auctionTokenCounter);
+        s_auctionTokenCounter++;
     }
 
     /// Public view / pure functions
