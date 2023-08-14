@@ -19,6 +19,9 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, IERC7
         uint256 expiryTimestamp;
     }
 
+    event BidIncreased(uint256 tokenId, address bidder, uint256 amount);
+    event AuctionEnded(uint256 tokenId, address highestBidder);
+
     error AuctionableNft__UpkeepNotNeeded();
     error AuctionableNft__NotEnoughFunds();
     error AuctionableNft__CollectionSoldOut();
@@ -35,16 +38,12 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, IERC7
     uint256 private constant AUCTION_DURATION = 2 * 24 * 60 * 60; // 2 days
     bytes4 private constant ONERC721RECEIVED_EVENT_SIGNATURE = 0x150b7a02; // The 'onERC721Received' event signature is given by keccak256("onERC721Received(address,address,uint256,bytes)")
 
-    string private s_name;
-    string private s_symbol;
     uint256 private s_tokenCounter;
     uint256 private s_auctionTokenCounter;
     string[MAX_NUM_TOKENS] s_tokenUris;
     AuctionListing[MAX_NUM_TOKENS] s_auctionListings;
     mapping(address => uint256) s_pendingWithdrawals;
     uint256 s_pendingWithdrawalsTotal;
-
-    // TODO: Emit events for important contract actions, such as minting, bidding, and transferring NFTs
 
     /**
      * Instantiate the contract
@@ -53,10 +52,7 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, IERC7
     constructor(address initialOwner, string memory name, string memory symbol)
         ERC721(name, symbol)
         Ownable(initialOwner)
-    {
-        s_name = name;
-        s_symbol = symbol;
-    }
+    {}
 
     /**
      * Deposit ether
@@ -114,6 +110,8 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, IERC7
 
         s_auctionListings[tokenId] =
             AuctionListing({bidderAddr: msg.sender, bidAmount: msg.value, expiryTimestamp: listing.expiryTimestamp});
+
+        emit BidIncreased(tokenId, msg.sender, msg.value);
     }
 
     /**
@@ -188,10 +186,14 @@ contract AuctionableNft is ERC721, AutomationCompatibleInterface, Ownable, IERC7
             revert AuctionableNft__UpkeepNotNeeded();
         }
 
-        AuctionListing memory auctionListing = s_auctionListings[s_auctionTokenCounter];
-        // TODO: add safe guard for this
-        ERC721(address(this)).safeTransferFrom(address(this), auctionListing.bidderAddr, s_auctionTokenCounter);
+        uint256 tokenId = s_auctionTokenCounter;
+        AuctionListing memory auctionListing = s_auctionListings[tokenId];
+        address bidderAddr = auctionListing.bidderAddr;
+        ERC721(address(this)).safeTransferFrom(address(this), bidderAddr, tokenId);
+
         s_auctionTokenCounter++;
+
+        emit AuctionEnded(tokenId, bidderAddr);
     }
 
     /// Public view / pure functions
